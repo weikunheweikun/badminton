@@ -1,5 +1,5 @@
 {
-  "version": "15.6",
+  "version": "16.0",
   "files": [
     {
       "path": "engine/attributes.py",
@@ -124,6 +124,10 @@
     {
       "path": "engine/analytics.py",
       "url": "engine/python/match/analytics.py"
+    },
+    {
+      "path": "engine/career_news.py",
+      "url": "engine/python/career/career_news.py"
     }
   ]
 }

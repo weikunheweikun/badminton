@@ -58,16 +58,41 @@ def retire(s,p,day,prob,reason):
 COUNTRIES=('CHN','INA','JPN','DEN','MAS','IND','THA','TPE','KOR','FRA','HKG','SGP','CAN','ENG','ESP','VIE','GER','USA','NED','FIN')
 WEIGHTS=(16,14,12,7,8,8,7,7,5,4,3,3,2,2,1,1,1,1,1,1)
 
+# Fictional name pools, used only for new youth cohorts. Independent RNG avoids altering ability draws.
+NAME_POOLS={
+ 'CHN':('林 许 唐 沈 周 顾 温 叶','若宁 芷晴 予安 诗妍 芮琪 嘉禾 清妤 映岚'),
+ 'TPE':('江 邱 许 蔡 苏 赖 卓 魏','语晴 昕妤 恬羽 若葳 芷安 语彤 以柔 映蓁'),
+ 'HKG':('梁 何 罗 陈 黄 余 邓 叶','咏晴 欣澄 芷瑜 嘉凝 颖彤 语欣 思岚 晴心'),
+ 'JPN':('Akiyama Mizuno Sakurai Fujino Morikawa Asano','Rina Yuna Mio Saki Ayane Hikari'),
+ 'KOR':('Yoon Kang Seo Bae Moon Chae','Ji-na Yu-ri Ha-rin Min-seo Eun-ha Su-bin'),
+ 'INA':('Prameswari Maheswari Nirmala Wulandari Pertiwi Sasmita','Alya Kirana Nabila Citra Laras Ayunda'),
+ 'THA':('Sirikul Chansiri Rattanai Pongsiri Thanasin','Nalin Pimlada Kanya Arisa Nicha'),
+ 'IND':('Mehra Rana Anand Desai Sethi Nair','Anika Kavya Mira Riya Ishani Tara'),
+ 'MAS':('Tan Lim Teoh Liew Ng Chan','Jia-Rou Xin-Ling Hui-Yan Mei-Rin Li-Qing Su-En'),
+ 'SGP':('Tan Koh Goh Lim Teo Ong','Xin-Yu Hui-Lin Jia-Rin Mei-Qi Su-Min Li-En'),
+ 'VIE':('Nguyen Tran Le Pham Hoang Vo','Mai Linh Thao An Ngoc Ha'),
+ 'DEN':('Lund Madsen Vestergaard Nissen Holst Berg','Freja Liv Alma Signe Thea Maja'),
+ 'FRA':('Morel Laurent Perrin Renard Dumas Petit','Lina Elise Manon Jade Lucie Celia'),
+ 'GER':('Keller Vogt Brandt Fuchs Winter Braun','Lena Mara Juna Nele Elisa Frieda'),
+ 'ESP':('Vega Ruiz Soler Rios Mora Vidal','Alba Ines Lia Clara Sara Lucia'),
+ 'NED':('Bakker Visser deVries Smit Vos Bos','Lotte Noor Fiene Mila Juna Sara'),
+ 'FIN':('Laine Aalto Niemi Salmi Kivi Ranta','Aino Iida Lumi Ella Siiri Emma'),
+}
+def youth_name(s,country,pid,used):
+    r=random.Random(seed(s['world_seed'],'youth-name157',pid));last,first=NAME_POOLS.get(country,('Brooks Reed Hale Hayes Nolan Ellis','Maya Elena Iris Eva Nora Lia'))
+    names=[(a+b if country in ('CHN','TPE','HKG') else a+' '+b if country in ('JPN','KOR','VIE') else b+' '+a) for a in last.split() for b in first.split()]
+    r.shuffle(names);return next((x for x in names if x not in used),f'{names[0]} {pid}')
+
 def intake(s,day,n):
     """Seeded independently per cohort/player. Newcomers have no fabricated points/results."""
-    r=random.Random(seed(s['world_seed'],'youth75',day));entries=[];meta=[]
+    r=random.Random(seed(s['world_seed'],'youth75',day));entries=[];meta=[];used={p.get('name') for p in s['players']+s['retired_players']}
     for j in range(n):
         pid=s['next_player_id']+j;country=r.choices(COUNTRIES,WEIGHTS)[0];age=r.choices([17,18,19,20,21],[8,29,35,23,5])[0]
         tier=r.choices(['regular','prospect','elite','exceptional'],[48,36,14,2])[0]
         ca_range,pa_range={'regular':((64,73),(77,85)),'prospect':((71,79),(85,92)),'elite':((77,85),(92,96)),'exceptional':((83,89),(96,99))}[tier]
         ca=round(r.uniform(*ca_range),4);pa=round(max(ca,r.uniform(*pa_range)),4)
         # IDs are world-unique; names intentionally visibly fictional, not real players.
-        name=f'{country} 女单青年球员 {day[:4]}-{pid:04d}'
+        name=youth_name(s,country,pid,used);used.add(name)
         attrs,style=synthetic_profile((s['world_seed'],'youth75',pid),ca)
         entries.append({'name':name,'country':country,'age':age,'ability':ability(attrs),'attributes':attrs,'potential_hidden':pa,'growth_factor':r.uniform(1.15,1.65),'decline_factor':r.uniform(.75,1.35),'peak_age':r.randint(24,29),'real':False})
         month,date=r.randint(1,12),r.randint(1,28);birth=str(dt.date(int(day[:4])-age-int((month,date)>(1,1)),month,date));meta.append((pid,birth,tier,style))

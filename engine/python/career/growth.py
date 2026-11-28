@@ -104,6 +104,89 @@ def phase(s,p,day):
     st={'name':label,'factor':r.uniform(lo,hi),'start':day,'until':(D(day)+dt.timedelta(weeks=weeks)).isoformat()}
     g['v52_phase']=st; return st
 
+# Tactical training projects share one weekly development budget. Empty focus
+# preserves the original automatic development; legacy allocations remain valid.
+TRAINING_DEFAULT = (45, 35, 20)
+TRAINING_PROJECTS = (
+    dict(id='attack', name='主动进攻', desc='后场下压、连续突击', keys=['杀球进攻','后场技术','爆发力','战术意识']),
+    dict(id='control', name='拉吊调动', desc='落点控制、前后场调动', keys=['拉吊控球','后场技术','击球稳定性','战术意识']),
+    dict(id='defense', name='防守反击', desc='接杀、被动回球与反击', keys=['防守能力','判断与预判','灵活性','移动速度']),
+    dict(id='net', name='网前压制', desc='网前争夺、抢接发球', keys=['网前技术','接发球','灵活性','判断与预判']),
+    dict(id='movement', name='步法与爆发', desc='启动、变向与移动效率', keys=['移动速度','爆发力','灵活性','身体素质']),
+    dict(id='endurance', name='耐力与身体维护', desc='长回合相持、维持竞技能力', keys=['体能耐力','身体素质','移动速度','击球稳定性']),
+    dict(id='mental', name='比赛心理与决策', desc='预判、抗压与临场判断', keys=['战术意识','判断与预判','抗压能力','专注度']),
+)
+PROJECTS = {p['id']:p for p in TRAINING_PROJECTS}
+
+
+def _base(plan):
+    return {'focus':plan['base_focus']} if 'base_focus' in plan else {'allocation':plan.get('base',list(TRAINING_DEFAULT))}
+
+
+def _choice(row):
+    return {'focus':row['focus']} if 'focus' in row else {'allocation':row['allocation']}
+
+
+def training_state(p):
+    g=p['development']; plan=g.get('training_plan',{}); changes=plan.get('changes',[])
+    current=_choice(changes[-1]) if changes else _base(plan)
+    focus=current.get('focus',[])
+    return {'focus':list(focus),'legacy': 'allocation' in current and list(current['allocation'])!=list(TRAINING_DEFAULT),
+            'projects':TRAINING_PROJECTS,'next_update':(D(g['last_update'])+dt.timedelta(days=7)).isoformat()}
+
+
+def set_training(p, day, focus):
+    if (not isinstance(focus,list) or len(focus) not in (0,2,3) or
+        any(not isinstance(v,str) or v not in PROJECTS for v in focus) or len(set(focus))!=len(focus)):
+        raise ValueError('请选择2至3项训练重点，或采用均衡训练')
+    focus=[k for k in PROJECTS if k in focus]
+    g=p['development']; current=training_state(p)
+    if not current['legacy'] and focus==current['focus']:return
+    plan=g.setdefault('training_plan',{'base':list(TRAINING_DEFAULT),'changes':[]})
+    changes=plan['changes']
+    if changes and changes[-1]['date']==day:changes.pop()
+    changes.append({'date':day,'focus':focus})
+
+
+def training_week(p, day):
+    plan=p['development'].get('training_plan',{})
+    current=_base(plan); changes=iter(plan.get('changes',[])); nxt=next(changes,None)
+    growth=dict.fromkeys(ATTR,0.); maintenance=dict.fromkeys(ATTR,0.); focus_days={}; legacy_days=0
+    for i in range(7,0,-1):
+        date=(D(day)-dt.timedelta(days=i)).isoformat()
+        while nxt and nxt['date']<=date:
+            current=_choice(nxt);nxt=next(changes,None)
+        if 'focus' in current:
+            focus=current['focus']; focus_days[tuple(focus)]=focus_days.get(tuple(focus),0)+1
+            for k in ATTR:
+                # Equal project shares; overlap is capped. Two priorities are
+                # more concentrated than three, not a smaller total budget.
+                strength=min(1.,2*sum(k in PROJECTS[f]['keys'] for f in focus)/len(focus)) if focus else 0.
+                growth[k]+=.75+.85*strength if focus else 1.
+                maintenance[k]+=.25*strength
+        else:
+            allocation=current['allocation']
+            if list(allocation)!=list(TRAINING_DEFAULT):legacy_days+=1
+            else:focus_days[()]=focus_days.get((),0)+1
+            for j,keys in enumerate(GROUPS):
+                ratio=allocation[j]/TRAINING_DEFAULT[j]
+                for k in keys:
+                    growth[k]+=clip(.55+.45*ratio,.55,1.65)
+                    maintenance[k]+=.25*clip(ratio-1,0,1)
+    return ({k:v/7 for k,v in growth.items()},{k:v/7 for k,v in maintenance.items()},
+            [{'focus':list(f),'days':n} for f,n in focus_days.items()],legacy_days)
+
+
+def finish_training_week(p, day):
+    plan=p['development'].get('training_plan')
+    if not plan:return
+    for row in plan['changes']:
+        if row['date']<day:
+            if 'focus' in row:plan['base_focus']=row['focus'];plan.pop('base',None)
+            else:plan['base']=row['allocation'];plan.pop('base_focus',None)
+    plan['changes']=[row for row in plan['changes'] if row['date']>=day]
+
+
 def growth_week(s,day):
     for p in s['players']:
         elapsed=(D(day)-D(p['development']['last_update'])).days
@@ -118,7 +201,7 @@ def growth_week(s,day):
             age=decimal_age(p,day)
         p['age']=int(age)
         if (D(day)-D(g['last_update'])).days<7:
-            g['last_update']=day;continue  # no growth for a partial debut week
+            g['last_update']=day;finish_training_week(p,day);continue  # no growth for a partial debut week
         a=p['ability']; cap=g['potential_hidden']; gap=max(0,cap-a); rs=rates(age,g['peak_age']); st=phase(s,p,day)
         games=logs[p['id']]; n=len(games)*365.25/84; load=load_factor(n)
         vals=[x for x in games if x is not None]; quality=sum(clip(1+x/100,.85,1.10) for x in vals)/len(vals) if vals else 1.
@@ -135,7 +218,22 @@ def growth_week(s,day):
                 # Bounded multiplicative variation, never creates growth when gap or rate is zero.
                 positive[k]=pos*f*r.uniform(.92,1.08)
                 negative[k]=neg*f*r.uniform(.96,1.04)
-        gross=sum(w*sum(positive[k] for k in keys)/len(keys) for w,keys in zip(WEIGHTS,GROUPS))
+        def gross_growth():
+            return sum(w*sum(positive[k] for k in keys)/len(keys) for w,keys in zip(WEIGHTS,GROUPS))
+        # Only the managed athlete has a custom allocation. Preserve the original
+        # potential ceiling, weekly growth budget, injury and match-load factors.
+        managed=p['id']==s.get('career_player_id')
+        if managed:
+            boosts,protection,focus_days,legacy_days=training_week(p,day)
+            original=gross_growth()
+            for k in ATTR:
+                positive[k]*=boosts[k]
+                negative[k]*=1-protection[k]*injury
+            revised=gross_growth()
+            # Focus redistributes development, never increases gross growth.
+            if revised>original and revised>0:
+                for k in positive:positive[k]*=original/revised
+        gross=gross_growth()
         budget=min(9,7*max(1,g['growth_factor']))/52
         scale=min(1,budget/gross) if gross>0 else 1.
         def change(scale):
@@ -153,6 +251,10 @@ def growth_week(s,day):
         p['attributes']=updated; p['ability']=derived_ability(updated); g['last_update']=day
         out.append({'player_id':p['id'],'date':day,'ability_before':a,'ability_after':p['ability'],'group_delta':[round(x,6) for x in d],'matches_84d':len(games),'load_factor':round(load,4),'injury_factor':injury,'phase':st['name'],'version':VERSION})
         out[-1]['attribute_delta']={k:round(updated[k]-before[k],4) for k in ATTR}
+        if p['id']==s.get('career_player_id'):
+            out[-1]['training_focus_days']=focus_days
+            out[-1]['training_legacy_days']=legacy_days
+            finish_training_week(p,day)
         out[-1]['pa_before']=list(p['potential_estimate'])
         potential_review(s,p,day,age,st)
         out[-1]['pa_after']=list(p['potential_estimate'])

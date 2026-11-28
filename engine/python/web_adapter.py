@@ -6,9 +6,12 @@ import career as m, career_events as old, registration as reg
 from match_engine import match_statistics, restore_match
 from analytics import player_report
 import qualification as qual
+import career_news as news
+from career_setup import complete_body
 from career_helpers import dateadd
 from attributes import ability
 from legacy_rally import ATTR
+from growth import training_state, set_training
 S=None
 ROSTER=json.loads((ROOT/'players.json').read_text())
 BASE=json.loads((ROOT/'players.json').read_text())
@@ -135,6 +138,27 @@ def migrate_athlete(s):
             p['employer']=None;p['contract']=None
     s['rules']['career_mode']='single fixed athlete until retirement; no annual player switching'
 
+def fictionalize(s):
+    # The opening roster uses permanent IDs; user-created and youth names are preserved.
+    for p in s['players']+s['retired_players']:
+        pid=p['id']
+        if p.get('origin')=='opening_roster' and 1<=pid<=len(ROSTER):
+            base=ROSTER[pid-1];p['name']=base['name']
+            if 'zh' in base:p['zh']=base['zh']
+            else:p.pop('zh',None)
+            for k in ('height_cm','handedness'):
+                if not p.get(k):p[k]=base[k]
+            p.update(real=False,profile_provenance='虚构球员档案',profile_version='15.7-fictional',profile_confidence='fictional',style_evidence='游戏技术风格',dob_source='游戏球员资料',birthdate_source='游戏球员资料',age_verified=False,age_basis='fictional_opening_age',attributes_status='虚构球员档案')
+            p.pop('profile_sources',None);p.pop('external_rating',None)
+        complete_body(p,(s['world_seed'],pid))
+    names={p['id']:p['name'] for p in s['players']+s['retired_players']}
+    for year in s['career_history']:
+        for row in year['players']:
+            if row['id'] in names:row['name']=names[row['id']]
+    for row in s['lifecycle_history']:
+        if row['id'] in names:row['name']=names[row['id']]
+    s['rules']['profile_dataset']='fictional women’s singles roster'
+
 def view(s):
     roster=[athlete_identity(s)] if athlete_identity(s) is not None else []; hist=[r for r in s['matches'] if set((r['a'],r['b']))&set(roster)]
     # Non-played outcomes are stored in event results rather than match archive.
@@ -146,7 +170,8 @@ def view(s):
         years.append(dict(year=y['year'],personal=next((q for q in y['players'] if q['id']==athlete_identity(s)),None),players=sorted(y['players'],key=lambda p:p['rank'])[:10],roster=y['roster'],champions=[dict(id=e['id'],name=e['name'],level=e['level'],champion=next((int(i) for i,z in y['events'].get(e['id'],{}).get('placements',{}).items() if z==0),None)) for e in y['calendar']]))
     def decorated(r):
         return {**result_summary(r),**group_info(s['v42']['events'].get(r['event_id'],{}),r)}
-    return dict(career_player_id=athlete_identity(s),career_ended=not s['club']['roster'],career_migration=s.get('career_migration'),calendar_policy=s.get('calendar_policy','legacy'),inbox=[x for x in reversed(s.get('registration_inbox',[])) if x.get('player_id')==athlete_identity(s)],inbox_read=s.get('registration_inbox_read',[]),date=s['date'],year=s['season_year'],roster=s['club']['roster'],players=[person(p) for p in s['players']],retired=[person(p) for p in s['retired_players']],calendar=events_view(s),match=match_pending(s),last={**public_match(hist[-1],record=hist[-1]),**group_info(s['v42']['events'].get(hist[-1]['event_id'],{}),hist[-1])} if hist else None,recent=[decorated(r) for r in hist[-30:]][::-1],world_recent=[decorated(r) for r in s['matches'][-12:]][::-1],years=years,news=s['lifecycle_history'][-40:][::-1],match_count=len(s['matches']),selection_open=False,closed=s['date'][:4] in s['v42']['year_closed'])
+    own=next((p for p in s['players'] if p['id']==athlete_identity(s)),None)
+    return dict(training=training_state(own) if own else None,career_player_id=athlete_identity(s),career_ended=not s['club']['roster'],career_migration=s.get('career_migration'),calendar_policy=s.get('calendar_policy','legacy'),inbox=[x for x in reversed(s.get('registration_inbox',[])) if x.get('player_id')==athlete_identity(s)],inbox_read=s.get('registration_inbox_read',[]),date=s['date'],year=s['season_year'],roster=s['club']['roster'],players=[person(p) for p in s['players']],retired=[person(p) for p in s['retired_players']],calendar=events_view(s),match=match_pending(s),last={**public_match(hist[-1],record=hist[-1]),**group_info(s['v42']['events'].get(hist[-1]['event_id'],{}),hist[-1])} if hist else None,recent=[decorated(r) for r in hist[-30:]][::-1],world_recent=[decorated(r) for r in s['matches'][-12:]][::-1],years=years,news=s['lifecycle_history'][-40:][::-1],match_count=len(s['matches']),selection_open=False,closed=s['date'][:4] in s['v42']['year_closed'])
 
 def group_standings(s,e,v,r,current):
     # Read-only mirror of the tournament tie-breaker; never changes injury or withdrawal state.
@@ -202,7 +227,7 @@ def growth_detail(s,pid):
     if p is None:raise ValueError('球员不存在')
     rows=sorted((r for r in s.get('growth_history_v53',[]) if r['player_id']==pid),key=lambda r:r['date'])
     # Existing records include exact weekly CA/group deltas. Do not invent older individual attributes or PA.
-    return dict(player_id=pid, date=p.get('retired_date',s['date']), debut_date=p.get('debut_date',s['date']), debut_CA=p.get('debut_CA',p['ability']), current_CA=p['ability'], current_PA=p.get('potential_estimate'), rows=[{k:r[k] for k in ('date','ability_before','ability_after','group_delta','attribute_delta','pa_before','pa_after','phase','matches_84d','load_factor','injury_factor') if k in r} for r in rows], annual=[dict(year=y['year'],CA=q['ability'],rank=q['rank']) for y in s['career_history'] for q in y['players'] if q['id']==pid])
+    return dict(player_id=pid, date=p.get('retired_date',s['date']), debut_date=p.get('debut_date',s['date']), debut_CA=p.get('debut_CA',p['ability']), current_CA=p['ability'], current_PA=p.get('potential_estimate'), rows=[{k:r[k] for k in ('date','ability_before','ability_after','group_delta','attribute_delta','pa_before','pa_after','phase','matches_84d','load_factor','injury_factor','training_allocation','training_focus_days','training_legacy_days') if k in r} for r in rows], annual=[dict(year=y['year'],CA=q['ability'],rank=q['rank']) for y in s['career_history'] for q in y['players'] if q['id']==pid])
 
 def custom_entry(raw):
     if not isinstance(raw,dict):raise ValueError('自建球员资料无效')
@@ -237,11 +262,11 @@ def handle(action,data):
         S=m.create(int(data.get('seed',secrets.randbits(32))),roster_input=roster,selected=ids)
         if 'custom' in data:
             own=next(p for p in S['players'] if p['id']==ids[0]);own['origin']='user_created';own['birthdate_source']='玩家自建生日';S['rules']['custom_player']=True
-        S['rules']['profile_choice']='custom' if 'custom' in data else data.get('profile','scouting');S['ui_registration_v76']=True;S['ui_qualification_v78']=True;S['ui_revision']='14.1';S['ui_sequential_v93']=True;S['ui_roster_id']=ROSTER_ID;S['rules']['discipline']='WS';S['rules']['profile_dataset']='2026-11 ranking snapshot + sourced biography + third-party result rating where available; modeled attributes';S['career_player_id']=ids[0];migrate_athlete(S);result={'new':True}
+        S['rules']['profile_choice']='custom' if 'custom' in data else data.get('profile','scouting');S['ui_registration_v76']=True;S['ui_qualification_v78']=True;S['ui_revision']='16.0';S['ui_sequential_v93']=True;S['ui_roster_id']=ROSTER_ID;S['rules']['discipline']='WS';S['rules']['profile_dataset']='fictional women’s singles roster';S['career_player_id']=ids[0];migrate_athlete(S);fictionalize(S);news.initialize(S);result={'new':True}
     elif action=='restore':
         s=json.loads(data['save']);
         if s.get('ui_roster_id')!=ROSTER_ID:raise ValueError('此版本仅支持新版女单生涯存档，请重新开档；旧男单存档请在旧版使用。')
-        if s.get('version')!=m.VERSION:raise ValueError('仅支持 V7.5 生涯存档')
+        if s.get('version')!=m.VERSION:raise ValueError('此存档格式不受支持，请使用兼容的女单生涯存档')
         # Preserve old closed/frozen deadlines, migrate only open or future events.
         if not s.get('ui_registration_v76'):
             for e in s['calendar']:
@@ -265,6 +290,7 @@ def handle(action,data):
             if s['date']!=patch['date'] or it['serial']!=patch['serial'] or not v['active']:raise ValueError('增量存档与生涯存档不匹配')
             v['active']=patch['active']
         migrate_athlete(s)
+        fictionalize(s);news.initialize(s)
         valid={x['id'] for x in s.get('registration_inbox',[])}
         s['registration_inbox_read']=sorted(set(s.get('registration_inbox_read',[])) | (set(data.get('inbox_read_patch') or []) & valid))
         old.prune_match_archive(s,migrate=True);view(s);S=s;result={'restored':True}
@@ -285,6 +311,10 @@ def handle(action,data):
         if action=='event':return {'detail':detail(S,data['event'])}
         if action in ('entry','withdraw','coach','play') and not S['club']['roster']:raise ValueError('个人生涯已结束')
         if action=='select':raise ValueError('个人生涯身份固定，不能更换球员')
+        elif action=='training':
+            own=next((p for p in S['players'] if p['id']==athlete_identity(S)),None)
+            if not own or not S['club']['roster'] or data.get('id')!=own['id']:raise ValueError('仅可调整现役生涯球员的训练计划')
+            set_training(own,S['date'],data.get('focus'));result={'training':True}
         elif action=='entry':reg.submit(S,data['event'],[int(i) for i in data['ids']]);result={'submitted':True,'event':data['event']}
         elif action=='withdraw':old.withdraw(S,data['event'],int(data['id']),data.get('reason','voluntary'));result={'withdrawn':True}
         elif action=='run':
@@ -322,7 +352,7 @@ def handle(action,data):
         else:raise ValueError('未知操作')
     S['rules']['engine']='V15.5 dual: handedness-aware spatial and calibrated fast simulation'
     S['rules']['registration']='station-day entry and draw; one overlapping event per managed team; existing frozen entries preserved'
-    S['ui_revision']='15.5'
+    S['ui_revision']='16.0'
     if compact_point:
         pending=match_pending(S);active=S['v42']['events'][data['event']]['active']
         # Only transmit the new display row; persist the active match independently of the world archive.

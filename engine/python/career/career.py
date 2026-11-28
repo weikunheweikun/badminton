@@ -13,6 +13,7 @@ from career_helpers import dateadd,persist,player,event
 VERSION='7.5-career'
 import qualification as qual
 import calendar_rules as cal80
+import career_news as news
 qual.install()
 
 
@@ -43,7 +44,10 @@ def play(s,eid,until='match',retire_id=None,fast=False):
     item=v['queue'][v['cursor']];a,b=item['a'],item['b'];n=len(s['matches'])
     ratings=[player(s,i)['ability'] if i is not None else None for i in (a,b)]
     if not v['active']:qual.recover_same_day(s,eid,item)
+    was_settled=v['settled']; old_injuries=set(s['v42']['injuries'])
     result=old.play(s,eid,until,retire_id,fast=fast)
+    if v['settled'] and not was_settled:news.settled(s,event(s,eid),v)
+    for i in set(s['v42']['injuries'])-old_injuries:news.injury(s,int(i))
     if len(s['matches'])>n:s['matches'][-1]['development_CA']=ratings # growth diagnostic only
     return result
 
@@ -87,7 +91,7 @@ def rollover(s):
     c=s['club'];c['sponsorships']=[o for o in c['sponsorships'] if o['end']>=day];c['annual_sponsor_income']=sum(o['annual_cash'] for o in c['sponsorships']);c['annual_in_kind']=0
     for p in s['players']:
         p['season_stats']={'wins':0,'losses':0,'titles':0};p['race_points']=0
-    select(s,[i for i in previous if i not in retired]);tick(s);s['committed84']=[p['id'] for p in sorted(s['players'],key=lambda p:p['rank'])[:15]];return {'year':year+1,'retired':retired,'newcomers':[p['id'] for p in newcomers],'active':len(s['players'])}
+    select(s,[i for i in previous if i not in retired]);news.season(s,retired,[p['id'] for p in newcomers]);tick(s);s['committed84']=[p['id'] for p in sorted(s['players'],key=lambda p:p['rank'])[:15]];return {'year':year+1,'retired':retired,'newcomers':[p['id'] for p in newcomers],'active':len(s['players'])}
 
 def tick(s):
     day=s['date']
@@ -98,7 +102,7 @@ def tick(s):
         old.prune_match_archive(s)
         # Restrict weekly scans to relevant data (full match and injury archives remain intact).
         view=s.copy();cutoff=dateadd(day,-168);view['matches']=[m for m in s['matches'] if m['date']>=cutoff];view['v42']=s['v42']|{'injury_history':[x for x in s['v42']['injury_history'] if x['until']>=dateadd(day,-7)]};growth_week(view,day)
-    rank.rankings(s);update_bests(s);refresh_interest(s)
+    rank.rankings(s);update_bests(s);refresh_interest(s);news.weekly(s)
 
 def run(s,target,auto=False,fast_auto=False,stop_event=None):
     D(target)
@@ -116,12 +120,12 @@ def run(s,target,auto=False,fast_auto=False,stop_event=None):
             continue
         before={eid:r['phase'] for eid,r in s['registrations'].items()}
         pause=old.process_entries(s,auto)
-        if pause:return pause
-        # Notify once at final draw; never interrupt for provisional outcomes.
-        failed=[]
+        # Deliver final decisions before matches or another registration prompt.
+        results=[]
         for e in s['calendar']:
             eid=e['id'];r=s['registrations'].get(eid,{})
-            if r.get('phase') not in ('drawn','cancelled') or before.get(eid) in ('drawn','cancelled','completed'):continue
+            if r.get('phase') not in ('drawn','cancelled'):continue
+            if before.get(eid) in ('drawn','cancelled','completed') and (reg.dates(s,e) or {}).get('draw')!=s['date']:continue
             for pid in s['club']['roster']:
                 decision=r.get('decisions',{}).get(str(pid),{})
                 if not decision.get('willing'):continue
@@ -131,9 +135,12 @@ def run(s,target,auto=False,fast_auto=False,stop_event=None):
                 reason=(('凭近12周S100决赛成绩优先入围资格赛；晋级后自动进入正赛，无需再次报名' if pid in r.get('merit_qualifiers',[]) else '进入资格赛，晋级后自动进入正赛，无需再次报名') if in_qual else '赛事取消' if r['phase']=='cancelled' else '已进入正式签表' if admitted else '资格审核未通过（伤病、冲突或积分资格）' if not decision.get('eligible_at_close') else '候补未递补 / 名额限制')
                 message={'id':eid+':'+str(pid),'event':eid,'event_name':e['name'],'date':s['date'],'player_id':pid,'admitted':admitted,'entry_status':'qualifying' if in_qual else 'direct' if admitted else 'rejected','reason':reason}
                 inbox=s.setdefault('registration_inbox',[])
-                if not any(x['id']==message['id'] for x in inbox):inbox.append(message)
-                if not admitted:failed.append(message)
-        # Results are delivered to inbox without interrupting match days.
+                if not any(x['id']==message['id'] for x in inbox):
+                    inbox.append(message);results.append(message)
+        if results and not auto:
+            return {'pause':'registration_result','event':results[-1]['event'],'mail_ids':[m['id'] for m in results],'date':s['date']}
+        if pause:return pause
+        # Explicit season-wide automatic simulation does not pause for mail.
         for eid,v in sorted(s['v42']['events'].items()):
             while not v['settled'] and v['cursor']<len(v['queue']) and v['queue'][v['cursor']]['date']==s['date']:
                 item=v['queue'][v['cursor']]

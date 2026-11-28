@@ -7,6 +7,14 @@ from career_helpers import persist
 from attributes import ability, synthetic_profile
 from match_engine import VERSION
 from fitness import initialize
+from season import seed
+from random import Random
+
+def complete_body(p,identity):
+    r=Random(seed(157,"body",identity))
+    if not isinstance(p.get("height_cm"),(int,float)) or not 140<=p["height_cm"]<=200:p["height_cm"]=max(153,min(183,round(r.gauss(168,5))))
+    if p.get("handedness") not in ("left","right"):p["handedness"]="left" if r.random()<.12 else "right"
+    return p
 def create(world_seed,year=2027,club_name="新俱乐部",city="未指定",cash=30_000_000,count=100,roster_input=None):
     s=create_v53(world_seed,year,club_name,city,cash,count,roster_input)
     for p in s['players']:
@@ -20,6 +28,7 @@ def create(world_seed,year=2027,club_name="新俱乐部",city="未指定",cash=3
             p['attributes_status']=entry.get('profile_provenance','supplied profile')
         for k in ('bwf_rank','bwf_points','dob','age_verified','zh','profile_style','profile_provenance','profile_sources','previous_reference_CA','dob_source','synthetic_archetype','age_basis','history_sample_count','profile_basis','height_cm','handedness','external_rating','profile_confidence','style_evidence'):
             if k in entry:p[k]=entry[k]
+        complete_body(p,(world_seed,p['name'],p['country']))
         if 'profile_style' in entry:p['profile_version']=entry.get('profile_version','10.9.2-ws')
         p['ability']=ability(p['attributes']);p['ability_anchor']=p['ability'];p['attribute_anchor_mean']=sum(p['attributes'].values())/16
         g=p['development'];g['potential_hidden']=max(g['potential_hidden'],p['ability']);g['v53_potential']['baseline']=g['potential_hidden']
