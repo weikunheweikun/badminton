@@ -3,6 +3,7 @@ import json, datetime as dt, calendar, random, itertools, copy, os
 from pathlib import Path
 from engine import clip
 from match_engine import start_match_v71, restore_match, match_statistics
+from analytics import archive
 from career_setup import create as base_create
 from career_helpers import PRIZE,BONUS,REP,bonus,seed_order,persist,player,event,dateadd,rng
 from fitness import daily,finish
@@ -192,6 +193,7 @@ def prune_match_archive(s, migrate=False):
             rec['final_snapshot']={k:v for k,v in snap.items() if k in ('a','b','spatial','spatial_detail','score','games','history','server','ends','fatigue','form','day_form','body_profiles')}
             if 'managed' not in rec:rec['managed']=bool(snap.get('spatial_detail') or 'log' in rec)
             if not rec['managed']:rec['statistics']=None
+        if rec.get('managed') and 'analytics_v153' not in rec:archive(rec)
         if 'log' not in rec:continue
         detailed+=1
         if detailed>12 or (detailed>1 and rec['date']<cutoff):

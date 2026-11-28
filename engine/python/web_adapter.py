@@ -4,6 +4,7 @@ ROOT=Path(__file__).resolve().parent
 sys.path.insert(0,str(ROOT/'engine'))
 import career as m, career_events as old, registration as reg
 from match_engine import match_statistics, restore_match
+from analytics import player_report
 import qualification as qual
 from career_helpers import dateadd
 from attributes import ability
@@ -91,7 +92,7 @@ def prematch_history(s, a, b):
             if len(meetings)<5:
                 games=r.get('history',[])
                 meetings.append(dict(date=r['date'],event_id=r['event_id'],winner=ids.index(r['winner']),history=games if pair==ids else [g[::-1] for g in games]))
-    return dict(wins=wins,recent=recent,meetings=meetings)
+    return dict(wins=wins,recent=recent,meetings=meetings,analytics=[player_report(s,i,10) for i in ids])
 
 def match_pending(s):
     for eid,v in sorted(s['v42']['events'].items()):
@@ -279,6 +280,7 @@ def handle(action,data):
             clone.point() # only populates bridge cache; career and RNG remain untouched
             return {'prefetched':True}
         if action=='checkpoint':return {'save':json.dumps(S,ensure_ascii=False,separators=(',',':'))}
+        if action=='player_report':return {'report':player_report(S,int(data['id']))}
         if action=='growth':return {'growth':growth_detail(S,int(data['id']))}
         if action=='event':return {'detail':detail(S,data['event'])}
         if action in ('entry','withdraw','coach','play') and not S['club']['roster']:raise ValueError('个人生涯已结束')
@@ -314,7 +316,7 @@ def handle(action,data):
         else:raise ValueError('未知操作')
     S['rules']['engine']='V15.1 dual: engine balance and tactical intelligence'
     S['rules']['registration']='station-day entry and draw; one overlapping event per managed team; existing frozen entries preserved'
-    S['ui_revision']='15.2'
+    S['ui_revision']='15.3'
     if compact_point:
         pending=match_pending(S);active=S['v42']['events'][data['event']]['active']
         # Only transmit the new display row; persist the active match independently of the world archive.
@@ -335,7 +337,7 @@ def rpc(action,data_json):
         if not isinstance(ids,list) or any(not isinstance(i,str) or i not in valid for i in ids):return json.dumps({'error':'消息不存在'},ensure_ascii=False)
         read=set(S.get('registration_inbox_read',[]));read.update(ids);S['registration_inbox_read']=sorted(read)
         return json.dumps({'read':True,'ids':ids},ensure_ascii=False)
-    if S is not None and action not in ('preview','event','growth','checkpoint','prefetch'):
+    if S is not None and action not in ('preview','event','growth','checkpoint','prefetch','player_report'):
         # A non-final point can only mutate its own active match; finish/retire/new matches still get a full transaction.
         if action=='play' and data.get('until')=='point' and data.get('retire_id') is None:
             v=S['v42']['events'].get(data.get('event'),{});active=v.get('active')
