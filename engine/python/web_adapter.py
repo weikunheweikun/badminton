@@ -300,8 +300,8 @@ def handle(action,data):
             clean={}
             for i,v in plans.items():
                 if i not in ('0','1') or pending[('a','b')[int(i)]] not in S['club']['roster'] or not isinstance(v,dict):raise ValueError('只能调整自己的比赛战术')
-                options={'mode':('auto','balanced','attack','control','counter','net','endurance','safe'),'target':('auto','front','rear','corners','backhand','body'),'serve':('auto','short','long'),'risk':('normal','low','high'),'pace':('normal','slow','fast'),'recovery':('auto','front','rear')}
-                defaults={'mode':'auto','target':'auto','serve':'auto','risk':'normal','pace':'normal','recovery':'auto'}
+                options={'mode':('auto','balanced','attack','control','counter','net','endurance','safe'),'target':('auto','front','rear','corners','backhand','body'),'risk':('normal','low','high'),'pace':('normal','slow','fast'),'recovery':('auto','front','rear')}
+                defaults={'mode':'auto','target':'auto','risk':'normal','pace':'normal','recovery':'auto'}
                 plan={k:v.get(k,defaults[k]) for k in options}
                 if any(plan[k] not in values for k,values in options.items()):raise ValueError('无效战术选项')
                 if plan!=defaults:clean[i]=plan
@@ -316,7 +316,7 @@ def handle(action,data):
         else:raise ValueError('未知操作')
     S['rules']['engine']='V15.1 dual: engine balance and tactical intelligence'
     S['rules']['registration']='station-day entry and draw; one overlapping event per managed team; existing frozen entries preserved'
-    S['ui_revision']='15.3'
+    S['ui_revision']='15.4'
     if compact_point:
         pending=match_pending(S);active=S['v42']['events'][data['event']]['active']
         # Only transmit the new display row; persist the active match independently of the world archive.

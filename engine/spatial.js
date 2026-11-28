@@ -77,9 +77,9 @@ function strokeClass(root,q,side,m){
 function contactGeometry(root,q,side,m,vel=pt(0,0)){
  const B=m.body||BODY,hand=m.hand??1,scale=B.scale??1,deltaZ=B.heightDelta??0;
  const forward=side===0?1:-1,dx=q.x-root.x,dy=q.y-root.y,gap=Math.hypot(dx,dy),strokeType=strokeClass(root,q,side,m),back=strokeType.toLowerCase().includes('back');
- const high=q.z>1.90,low=q.z<1.25, speed=Math.hypot(vel.x,vel.y),yaw=(side===0?0:Math.PI)+hand*(strokeType==='overBack'?-1.28-.24*cl((-dx*forward+.12)/.65,0,1):strokeType==='aroundHead'?-.33:back?(low?-.55:-.65):high?.12:0);
+ const high=q.z>1.90,low=q.z<1.25, speed=Math.hypot(vel.x,vel.y),localLat=dy*forward*hand/scale,localFwd=dx*forward/scale,backTurn=cl(.36+.58*cl((-localLat-.12)/.85,0,1)+.28*cl((.35-localFwd)/.70,0,1),.36,1.20),yaw=(side===0?0:Math.PI)+hand*(strokeType==='overBack'?-1.02-.48*cl((-localLat-.20)/.85,0,1)-.24*cl((-localFwd+.12)/.65,0,1):strokeType==='aroundHead'?-.33:back?-backTurn:high?.12:0);
  const right={x:-Math.sin(yaw)*hand,y:Math.cos(yaw)*hand},ux=gap?dx/gap:0,uy=gap?dy/gap:0;
- const lean=cl((gap-.38*scale)*.47,0,(low?.36:.27)*scale),hipShift=lean*.23, crouch=low?cl((1.25-q.z)*.36,.04,.29):0;
+ const lean=cl((gap-.38*scale)*(back&&!high?.56:.47),0,(low?.36:.27)*scale),hipShift=lean*.23, crouch=low?cl((1.25-q.z)*.36,.04,.29):0;
  // Only modest elevation for ordinary overhead contact; higher contacts require a jump.
  const elevation=high?cl((q.z-2.34-deltaZ)*.82,0,.31):0;
  const jumpHeight=Math.max(0,elevation-.045),jump=jumpHeight>.035;
@@ -413,7 +413,11 @@ Object.assign(P,{strokeConstraint,steepServeDemand,ARC_LIMITS,envelope,liftMode,
 const {W,L,N,S,cl,mix,dist,pt,lerp,ATTR,presets,SHOTS,rng,norm,profile,local,depth,sideOf,a,EXEC,RESP,COST,FAMILY,weighted,execution,response,rawAttr,workload,loadScale,loadDelta,decisionNoise,fatigueScale,athletic,mobility,moveTime,travel,motionStart,motionShape,motionPlan,pathState,pathPos,flightBasis,ballAt,apexTime,crossAt,inBounds,makeBall}=P;
 // Foot placement is height-dependent: overhead contacts are in front of the torso,
 // low shots use a lunge; don't let a fixed long reach keep both players at centre.
-function footFor(pos,b,m,side,compact=false){let d=dist(pos,b),high=b.z>1.9,low=b.z<1.25,r=Math.min(m.reach*(high?.54:low?.83:.70),d),f=d?lerp(b,pos,r/d):pt(b.x,b.y);if(high){let sign=side===0?-1:1;f.x=mix(f.x,b.x+sign*.38,compact?.22:.62);f.y=mix(f.y,b.y,compact?.08:.25);}const bound=v=>pt(cl(v.x,side===0?-.65:N+.12,side===0?N-.12:L+.65),cl(v.y,-W-.55,W+.55));f=bound(f);if(!P.contactGeometry(f,b,side,m).feasible){for(const t of [.25,.50,.75]){const test=bound(lerp(f,b,t));if(P.contactGeometry(test,b,side,m).feasible){f=test;break;}}}return f;}
+function footFor(pos,b,m,side,compact=false){let d=dist(pos,b),high=b.z>1.9,low=b.z<1.25,r=Math.min(m.reach*(high?.54:low?.83:.70),d),f=d?lerp(b,pos,r/d):pt(b.x,b.y);if(high){let sign=side===0?-1:1;f.x=mix(f.x,b.x+sign*.38,compact?.22:.62);f.y=mix(f.y,b.y,compact?.08:.25);}const bound=v=>pt(cl(v.x,side===0?-.65:N+.12,side===0?N-.12:L+.65),cl(v.y,-W-.55,W+.55));f=bound(f);if(!P.contactGeometry(f,b,side,m).feasible){for(const t of [.25,.50,.75]){const test=bound(lerp(f,b,t));if(P.contactGeometry(test,b,side,m).feasible){f=test;break;}}}
+ // Compact backhand defense: do not run the pelvis all the way to the shuttle
+ // if the racket can intercept in front of the body. Choose a reachable root
+ // with reserve extension; same deterministic candidates in forecast and execution.
+ if(compact&&b.z<1.90&&(b.y-pos.y)*(side===0?1:-1)*m.hand<-.18){const forward=side===0?1:-1,hand=m.hand;let best=f,score=Infinity;for(const root of [f,bound(pos),...([.25,.46,.65].flatMap(dx=>[.32,.56,.78].map(dy=>bound(pt(b.x-forward*dx,b.y+forward*hand*dy)))) )]){const g=P.contactGeometry(root,b,side,m);if(!g.feasible)continue;const cost=dist(pos,root)+.65*cl((g.extension-.78)/.22,0,1)+.20*cl((.10-(b.x-root.x)*forward)/.5,0,1);if(cost<score){score=cost;best=root;}}f=best;}return f;}
 // V10.9: observation-only prediction. Physics owns the actual path; the player
 // reads delayed positions, then estimates the decay/flight clock from those samples.
 const FAST=['smash','half','kill','drive'], HIGH=['clear','lift','long','punch'];
@@ -435,6 +439,7 @@ function recoveryDelay(p,kind,quality,f){return recoveryTime(p,kind,f)*(['smash'
 // V14.8: landing and follow-through run concurrently, not consecutively.
 // Emergency recovery remains a separate constraint; no change to speed or reach.
 function strokeRecovery(p,kind,quality,f,contact){const air=(contact?.geometry?.flightTime??0)*.5;return {air,delay:Math.max(air,recoveryDelay(p,kind,quality,f),contact?.special?.recovery??0)};}
+function gripChangeDelay(last,back,kind,high=false){return last&&last.back!=null&&last.back!==back?(['smash','half','drive'].includes(kind)&&!high&&back?.016:.042):0;}
 function contactFailure(burden,critical,margin,skill,focus,acute=0){return cl((.0015+.36*burden**2.05+.19*critical**3*burden+.09*cl(-margin/.12,0,1)+.13*acute*burden**1.3)*Math.exp((85-skill)*.021+(85-focus)*.010),.0003,.45);}
 // Common reach envelope: normal contact versus a stretched, lower-quality save.
 function contactReach(m,q,kind){const fast=FAST.includes(kind),front=['net','drop','block','short'].includes(kind),r=m.reach+(fast?.37:front?.21:.16);return r*(q.z>1.9?.87:q.z<1.25?1.07:1);}
@@ -464,12 +469,12 @@ function intercept(b,pos,p,f,side,incoming,serve=false,vel=pt(0,0),context={}){
  const observe=t=>ballAt(b,t); // only called for timestamps <= current time
  let x={...pos},v={...vel},travelled=0,t=0,nextUpdate=react,aim=null,contactTime=Infinity,settled=false,forecast=null,letBall=false,attempt=null,best=null,miss=null,failed=false,reachAttempt=null,closest=Infinity;
  const nodes=[[0,x.x,x.y,v.x,v.y,0]],addNode=()=>nodes.push([t,x.x,x.y,v.x,v.y,travelled]);
- function prepFor(q){const back=P.strokeClass(x,q,side,m).toLowerCase().includes('back'),change=last&&last.back!==back,demand=contactDemand(p,m,side,x,q,incoming);return {back,prep:cl((fast?.055:.092)+(99-agility)*.0014+(change?.042:0)+f*.0005+demand.prep,.045,.26)};}
+ function prepFor(q){const back=P.strokeClass(x,q,side,m).toLowerCase().includes('back'),change=gripChangeDelay(last,back,incoming,q.z>1.9),demand=contactDemand(p,m,side,x,q,incoming);return {back,prep:cl((fast?.055:.092)+(99-agility)*.0014+change+f*.0005+demand.prep,.045,.26)};}
  function chooseContact(pred,now){const pb=pred.b;let chosen=null;const end=pb.T-.015;
   for(let tt=Math.max(now+.035,react+.035);tt<end;tt+=quick?.035:.055){let q=ballAt(pb,tt),d=depth(side,q);if(d<.012||d>7.15||Math.abs(q.y)>W+.55||q.z<.10||q.z>maxZ)continue;
    const calmFront=!quick&&d<2.55&&['net','drop','block','short'].includes(incoming);const foot=footFor(x,q,{...m,reach:reach*(calmFront?.89:q.z<1.4?1.05:.95)},side,quick),d0=dist(x,foot),speed=Math.hypot(v.x,v.y),align=d0*speed>.001?((foot.x-x.x)*v.x+(foot.y-x.y)*v.y)/(d0*speed):0,prep=prepFor(q).prep;
    const g=P.contactGeometry(foot,q,side,m,v),turnTime=speed>.3?m.turn*(1-align)*.50:0;const need=Math.max(0,restUntil-now,P.approachTime(x,foot,v,m)+turnTime)+prep+(g.jump?g.flightTime*.42:0),margin=tt-now-need,ideal=cl((q.z-.2)/2.5,0,1);
-   const score=cl(margin,-1,.20)*2.95+ideal*(high?1.20:.94)-(tt-now)*(high?.45:.60)-d0*.04+(high?.12*cl(d/6.7,0,1):0);
+   const score=cl(margin,-1,.20)*2.95+ideal*(high?1.20:.94)-(tt-now)*(high?.45:.60)-d0*.04+(high?.12*cl(d/6.7,0,1):0)-(g.feasible?0:.85+Math.max(0,-g.margin)*2)-(quick&&g.back&&q.z<1.9?.24*cl((g.extension-.83)/.17,0,1):0);
    if(!chosen||score>chosen.score)chosen={foot,t:tt,margin,score};
   }return chosen;}
  function evaluate(now){if(now<Math.max(react,airUntil,lockedUntil)||failed||letBall||!aim||!forecast)return;
@@ -552,7 +557,7 @@ function intercept(b,pos,p,f,side,incoming,serve=false,vel=pt(0,0),context={}){
  return {best,miss,m,plan,attempt,failed,letBall,netFault,stopAt,reachAttempt};
 }
 
-Object.assign(P,{footFor,intercept,predict,recoveryTime,contactFailure,recoveryDelay,strokeRecovery,contactReach,rescueReach,receivePressure,quickReaction,contactDemand});
+Object.assign(P,{footFor,intercept,predict,recoveryTime,contactFailure,recoveryDelay,strokeRecovery,contactReach,rescueReach,receivePressure,quickReaction,contactDemand,gripChangeDelay});
 })(globalThis.SmashParts ||= {});
 
 
@@ -623,7 +628,7 @@ function opponentForecast(b,other,of,os,opos,ctx,kind,samples=12){
   const t=mix(Math.max(cross.t+.008,0),b.T*.985,i/samples),q=ballAt(b,t);
   if(t<=cross.t||depth(os,q)<.012||q.z<.10||q.z>maxZ||Math.abs(q.y)>W+.55)continue;
   const ft=footFor(opos,q,{...m,reach:P.contactReach(m,q,kind)},os,fast||kind==='punch'),dd=dist(opos,ft),speed=Math.hypot(v.x,v.y),alignment=dd*speed>.01?((ft.x-opos.x)*v.x+(ft.y-opos.y)*v.y)/(dd*speed):0;
-  const geom=P.contactGeometry(ft,q,os,m,v);if(!geom.feasible)continue;const demand=P.contactDemand(other,m,os,ft,q,kind,geom),change=(last&&last.back!=null&&last.back!==geom.back)?.042:0;
+  const geom=P.contactGeometry(ft,q,os,m,v);if(!geom.feasible)continue;const demand=P.contactDemand(other,m,os,ft,q,kind,geom),change=P.gripChangeDelay(last,geom.back,kind,q.z>1.9);
   const travelT=Math.max(0,P.approachTime(opos,ft,v,{...m,brake:.60})),need=Math.max(rest,react+travelT+(speed>.3?m.turn*(1-alignment)*.50:0)) +prep+change+demand.prep+(geom.jump?geom.flightTime*.42:0)+(99-anticipation)*.0011+.018,margin=t-need;
   const bv=P.ballVelocity(b,t),ballSpeed=Math.hypot(bv.x,bv.y,bv.z),front=depth(os,q)<2.5,defense=rawAttr(other,'防守能力')-85,speedStress=unit((Math.hypot(bv.x,bv.y,.65*bv.z)-(front?5.5:10))/(front?19:31)*cl(1-.016*defense,.72,1.28));
   const ownQuality=unit(.83+.004*(response(other,kind)-85)+.10*unit((q.z-.2)/1.65)-(fast?.35:.24)*speedStress+(fast?.010*defense*unit((ballSpeed-4)/12):.003*defense)-.26*unit((.13-margin)/.38)-.13*unit(dd/5)-.10*unit((rest+prep+.10-t)/.20)-of*.0015-(other._acute||0)*.15-demand.quality-.19*P.steepServeDemand(kind,bv));
@@ -756,10 +761,10 @@ function aimPoints(kind,os,from,opos,vel,domain,phase=.5,phaseY=.5,count=7,recei
 function tacticalState(previous,events,winner,server){
  const out=[0,1].map(i=>{const old=previous?.[i]||{},own=events.filter(e=>e.actor===i),opp=events.filter(e=>e.actor!==i),last=events.at(-1),error=last.terminal==='unforced_error'&&winner!==i?1:0;
  const ema=(k,x)=>.82*(Number.isFinite(old[k])?old[k]:x)+.18*x;
- return {n:(old.n||0)+1,mode:own.at(-1)?.decision?.mode||old.mode||'balanced',win:ema('win',+(winner===i)),error:ema('error',error),attack:ema('attack',opp.filter(e=>ATTACK.includes(e.kind)).length/Math.max(1,opp.length)),front:ema('front',opp.filter(e=>FRONT.includes(e.kind)).length/Math.max(1,opp.length)),load:ema('load',events.reduce((v,e)=>v+e.costs[i],0)),serveShortN:(old.serveShortN||0)+ +(server===i&&events[0].kind==='short'),serveShortW:(old.serveShortW||0)+ +(server===i&&events[0].kind==='short'&&winner===i),serveLongN:(old.serveLongN||0)+ +(server===i&&events[0].kind==='long'),serveLongW:(old.serveLongW||0)+ +(server===i&&events[0].kind==='long'&&winner===i)};});return out;
+ return {n:(old.n||0)+1,mode:own.at(-1)?.decision?.mode||old.mode||'balanced',win:ema('win',+(winner===i)),error:ema('error',error),attack:ema('attack',opp.filter(e=>ATTACK.includes(e.kind)).length/Math.max(1,opp.length)),front:ema('front',opp.filter(e=>FRONT.includes(e.kind)).length/Math.max(1,opp.length)),load:ema('load',events.reduce((v,e)=>v+e.costs[i],0))};});return out;
 }
 function adaptivePlan(p,other,state,f,of){
- const s=state||{},intel=P.decisionIntelligence(p),manual=p.coach||{},m={...manual};let mode=manual.mode||'auto';
+ const s=state||{},intel=P.decisionIntelligence(p),manual=p.coach||{},m={...manual};delete m.serve;let mode=manual.mode||'auto';
  if(mode==='auto'){mode=({进攻:'attack',拉吊:'control',防反:'counter',网前:'net',耐力:'endurance',重炮:'attack',突击:'attack'}[p.style]||'balanced');if(s.n>=6&&intel>.42){if(s.error>.34&&s.win<.46)mode='safe';else if(s.attack>.32&&s.win<.47)mode='counter';else if(s.front>.40&&s.win<.45)mode='control';else if(of>f+6&&s.win>.44)mode='endurance';}}
  return {...m,mode,auto:!manual.mode||manual.mode==='auto',risk:manual.risk||'normal',pace:manual.pace||'normal',recovery:manual.recovery||'auto'};
 }
@@ -773,15 +778,11 @@ function tacticalIntent(p,other,as,opos,prevOwn,c,plan){const os=as^1,od=depth(o
  return {type:Math.abs(oy)>1.15?'opposite':'neutral',strength:.12,oy};}
 function choose(r,p,other,f,of,side,from,h,quality,opos,prev,server,score,key,ownPos,ctx={}){
  const os=side^1,plan=p.coach||{};if(server){
-  const sy=(score%2===0?1:-1)*(side===0?1:-1),opts=[],mem=ctx.strategy||{};
-  for(const kind of ['short','long']){const sigma=P.strokeSpread(p,kind,f,quality,key).sigma,dep=kind==='short'?2.40:cl(6.7-2.0*sigma,6.05,6.42);
-   for(const lane of kind==='short'?[.62,1.35,2.04]:[.48,1.27,2.02]){const target=pt(local(os,dep,0).x,-sy*lane),b=makeBall(null,kind,from,h,target,p,f,quality,0,key,true),cross=crossAt(b);if(!cross||cross.z<1.55||!P.serviceLegal(b.to,os,sy))continue;
-    const fc=opponentForecast(b,other,of,os,opos,ctx,kind,9),risk=shotRisk(p,f,kind,quality,{},b,cross,false,key,target),n=mem[kind==='short'?'serveShortN':'serveLongN']||0,w=mem[kind==='short'?'serveShortW':'serveLongW']||0,history=(w+3)/(n+6)-.5;
-    const prior=kind==='short'?.12:0,preference=plan.serve===kind?.34:0;
-    const next=replyForecast({kind,target,forecast:fc},p,other,f,of,side,ownPos,ctx,quality,key,P.decisionIntelligence(p));
-    opts.push({kind,target,risk,forecast:fc,recovery:next.recovery,setup:next.setup,utility:prior+preference+.42*(1-fc.returnChance)+.38*(1-fc.quality)-.32*fc.replyAttack-1.25*risk+.34*next.value+.35*history});
-   }}
-  if(!opts.length)return {kind:'short',target:pt(local(os,2.48,0).x,-sy*1.3)};
+  const sy=(score%2===0?1:-1)*(side===0?1:-1),opts=[],kind='long',sigma=P.strokeSpread(p,kind,f,quality,key).sigma,dep=cl(6.7-2.0*sigma,6.05,6.42);
+  for(const lane of [.48,1.27,2.02]){const target=pt(local(os,dep,0).x,-sy*lane),b=makeBall(null,kind,from,h,target,p,f,quality,0,key,true),cross=crossAt(b);if(!cross||cross.z<1.55||!P.serviceLegal(b.to,os,sy))continue;
+   const fc=opponentForecast(b,other,of,os,opos,ctx,kind,9),risk=shotRisk(p,f,kind,quality,{},b,cross,false,key,target),next=replyForecast({kind,target,forecast:fc},p,other,f,of,side,ownPos,ctx,quality,key,P.decisionIntelligence(p));
+   opts.push({kind,target,risk,forecast:fc,recovery:next.recovery,setup:next.setup,utility:.42*(1-fc.returnChance)+.38*(1-fc.quality)-.32*fc.replyAttack-1.25*risk+.34*next.value});}
+  if(!opts.length)return {kind,target:pt(local(os,6.15,0).x,-sy*1.3)};
   const top=Math.max(...opts.map(x=>x.utility)),weights=opts.map(x=>Math.exp((x.utility-top)/.15));let v=r()*weights.reduce((a,b)=>a+b,0);for(let i=0;i<opts.length;i++){v-=weights[i];if(v<=0)return opts[i];}return opts.at(-1);
  }
  const c=contactState(p,f,side,from,h,quality,ownPos,ctx),kinds=ctx.contact?.special?(ctx.contact.special.type==='spin'?['clear','lift','drop','block']:['lift','block','net']).filter(k=>k==='lift'||candidateKinds(h,c.d,prev,quality,c).includes(k)):candidateKinds(h,c.d,prev,quality,c),receiving=prev==='short'||prev==='long';

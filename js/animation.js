@@ -288,11 +288,18 @@ function pose(i,p,e,t,ends,nextEvent=null,restMotion=null,prevEvent=null,rest=0,
  if(geometry&&Number.isFinite(geometry.yaw)){
   // Use the same impact yaw throughout the stroke envelope. Distinct hip and shoulder
   // preparation remain, but both converge smoothly to the committed contact geometry.
-  const impactLocal=angleDelta(base,geometry.yaw),u=dt<0?smooth((dt+M.pre)/M.pre):smooth(dt/M.post),prepLocal=backMotion?hand*backMotion.yaw[0]:-hand*M.wind,followLocal=backMotion?hand*backMotion.yaw[2]:hand*M.turn;
+  const impactLocal=angleDelta(base,geometry.yaw),u=dt<0?smooth((dt+M.pre)/M.pre):smooth(dt/M.post),prepLocal=backMotion?impactLocal+hand*(geometry.strokeType==='overBack'?-.30:-.18):-hand*M.wind,followLocal=backMotion?impactLocal*.30+hand*.12*cl((hit.ball.to.y-hit.ball.from.y)*front*hand/Math.max(.5,Math.abs(hit.ball.to.x-hit.ball.from.x)),-1,1):hand*M.turn;
   const local=dt<0?prepLocal+angleDelta(prepLocal,impactLocal)*u:impactLocal+angleDelta(impactLocal,followLocal)*u;
   theta=base+movingYaw*(1-env)+local*env;hipYaw=base+movingYaw*(1-env)+local*env*(1-.35*(1-align));
  }
  if(special?.type==='spin'&&dt<0){const turn=hand*2*Math.PI*smooth((dt+M.pre)/M.pre);hipYaw+=turn;theta+=turn;}
+ // The trunk returns continuously to the locomotion pose after the arm follow-through.
+ // Evaluate both adjacent own strokes so a short flight cannot cut recovery at an event boundary.
+ let trunk=[];for(const [ev,age] of [[prevEvent,prevEvent?prevEvent.duration+t:0],[e,t],[nextEvent,nextEvent?t-e.duration:0]]){const g=ev?.contactGeometry;if(!ev||ev.actor!==i||!g?.back||!Number.isFinite(g.yaw)||age<0)continue;const isRear=g.strokeType==='overBack',span=isRear?.58:.38,weight=(1-smooth(age/span));if(weight>0)trunk.push({g,ev,age,weight,span});}
+ trunk.sort((a,b)=>b.weight-a.weight);const tail=trunk[0];
+ if(tail){const {g,ev,age,weight,span}=tail,impactLocal=angleDelta(base,g.yaw),out=Smash.ballVelocity(ev.ball,0),outSide=cl(out.y*front*hand/Math.max(1,Math.abs(out.x)),-1,1),release=smooth(age/Math.min(.18,span*.45)),follow=impactLocal*(1-(g.strokeType==='overBack'?.30:.48)*release)+hand*.14*outSide*release;
+  const influence=weight*(hit===ev?1:1-env);theta+=angleDelta(theta,base+mix(movingYaw,follow,weight))*influence;hipYaw+=angleDelta(hipYaw,base+mix(movingYaw,follow,weight*.88))*influence;
+ }
  let f=pt(Math.cos(theta),Math.sin(theta),0),right=pt(-f.y*hand,f.x*hand,0),hf=pt(Math.cos(hipYaw),Math.sin(hipYaw),0),hr=pt(-hf.y,hf.x,0),fx=f.x,fy=f.y,rx=right.x,ry=right.y;
  // Only a genuine jump lifts the pelvis and both feet. Grounded overhead
  // reaches extend the hitting shoulder, with a planted split/scissor stance.
@@ -309,6 +316,7 @@ function pose(i,p,e,t,ends,nextEvent=null,restMotion=null,prevEvent=null,rest=0,
  if(special?.type==='between'){hip.z=mix(hip.z,.72*scale,specialEnv*.65);}
  if(contact){let horiz=pt(contact.x-p.x,contact.y-p.y,0),reach=V.len(horiz),lean=cl((reach-.47)*.65,0,.30)*env;if(low)lean=Math.min(.36,lean+.08*env);let u=V.unit(horiz);tilt=V.add(tilt,V.mul(u,lean));hip=V.add(hip,V.mul(u,lean*.25));}
  if(power){const lean=dt<0?mix(-.12,.10,Math.pow(cl((dt+M.pre)/M.pre,0,1),3)):.20*(1-smooth(dt/M.post));tilt=V.add(tilt,V.mul(f,lean*env));}
+ if(tail){const {g,age,weight}=tail,blendWeight=weight*(hit===tail.ev?1:1-env)*.82;const axis0=V.sub(g.center,g.hip);tilt=blend(tilt,pt(axis0.x,axis0.y,0),blendWeight);}
  let axis=V.unit(pt(tilt.x,tilt.y,BODY.torso)),shoulder=V.add(hip,V.mul(axis,BODY.torso));
   let body=(a,b,z)=>pt(shoulder.x+fx*a*scale+rx*b*scale,shoulder.y+fy*a*scale+ry*b*scale,shoulder.z+(z-shoulder.z)*scale),R=V.add(shoulder,V.mul(right,BODY.shoulderHalf)),L=V.add(shoulder,V.mul(right,-BODY.shoulderHalf));
  // Neutral grip: elbows relaxed and bent, racket upright and slightly forward,
