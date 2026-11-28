@@ -78,12 +78,29 @@ def events_view(s):
         rows.append(dict(**e,team_conflicts=blocked,conflicts={str(i):[o['name'] for o in s['calendar'] if o['id']!=eid and o['status']!='cancelled' and e['start']<=o['end'] and o['start']<=e['end'] and i in s['registrations'].get(o['id'],{}).get('entries',[]) and str(i) not in s['registrations'].get(o['id'],{}).get('withdrawn',{})] for i in s['club']['roster']},overlaps=[o['name'] for o in s['calendar'] if o['id']!=eid and e['start']<=o['end'] and o['start']<=e['end']],qualification=dict(direct=direct,entrants=qualifiers,winners=q.get('winners',[]),eliminated=q.get('eliminated',{}),finished=q.get('finished',False),main_entries=q.get('main_entries',[])),sporting_status=sporting_status(v),deadlines=d,phase=phase,intents=r.get('intents',{}),accepted=r.get('entries',[]),reserves=r.get('reserves',[]),withdrawn=r.get('withdrawn',{}),controlled=controlled,decisions=r.get('decisions',{}),played=v.get('cursor',0),total=len(v.get('queue',[])),champion=next((int(i) for i,z in v.get('placements',{}).items() if z==0),None)))
     return rows
 
+def prematch_history(s, a, b):
+    """Only recorded, completed simulated matches; exclude walkovers and byes."""
+    ids=(a,b); recent=[[],[]]; meetings=[]; wins=[0,0]
+    for r in reversed(s['matches']):
+        if r.get('outcome')!='played' or r.get('winner') is None:continue
+        pair=(r.get('a'),r.get('b'))
+        for i,pid in enumerate(ids):
+            if pid in pair and len(recent[i])<10:recent[i].append(int(r['winner']==pid))
+        if set(pair)==set(ids):
+            wins[ids.index(r['winner'])]+=1
+            if len(meetings)<5:
+                games=r.get('history',[])
+                meetings.append(dict(date=r['date'],event_id=r['event_id'],winner=ids.index(r['winner']),history=games if pair==ids else [g[::-1] for g in games]))
+    return dict(wins=wins,recent=recent,meetings=meetings)
+
 def match_pending(s):
     for eid,v in sorted(s['v42']['events'].items()):
         if not v['settled'] and v['cursor']<len(v['queue']):
             it=v['queue'][v['cursor']]
             if it['date']==s['date'] and (set((it['a'],it['b']))&set(s['club']['roster']) or v['active']) and (v['active'] or qual.playable(s,eid,it)):
                 out={**public_match({**it,'event_id':eid},v['active']),**group_info(v,it)}
+                if not out['log']:
+                    out['prematch']=prematch_history(s,it['a'],it['b'])
                 if not v['active']:
                     players={p['id']:p for p in s['players']}
                     out['body_profiles']=[{k:players.get(i,{}).get(k) for k in ('height_cm','handedness')} for i in (it['a'],it['b'])]
@@ -297,7 +314,7 @@ def handle(action,data):
         else:raise ValueError('未知操作')
     S['rules']['engine']='V15.1 dual: engine balance and tactical intelligence'
     S['rules']['registration']='station-day entry and draw; one overlapping event per managed team; existing frozen entries preserved'
-    S['ui_revision']='13.9'
+    S['ui_revision']='15.2'
     if compact_point:
         pending=match_pending(S);active=S['v42']['events'][data['event']]['active']
         # Only transmit the new display row; persist the active match independently of the world archive.
