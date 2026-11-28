@@ -1,10 +1,10 @@
 /* Career worker. No blob URLs or embedded source code. */
-importScripts("../engine/spatial.js?v=15.4", "../engine/spatial-bridge.js?v=15.4");
+importScripts("../engine/spatial.js?v=15.6", "../engine/spatial-bridge.js?v=15.6");
 const CDN='https://cdn.jsdelivr.net/pyodide/v0.27.7/full/';
 const rootURL=new URL('../',self.location.href);
 let py,initializing;
 async function fetchText(path){
- const url=new URL(path,rootURL);url.searchParams.set('v','15.4');const res=await fetch(url);
+ const url=new URL(path,rootURL);url.searchParams.set('v','15.6');const res=await fetch(url);
  if(!res.ok)throw Error(`无法读取 ${path} (HTTP ${res.status})`);
  return res.text();
 }

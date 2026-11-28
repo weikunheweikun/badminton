@@ -1,4 +1,4 @@
-"""Qualification extension: one entry, frozen eligibility, two rounds maximum.
+"""Qualification extension: one entry, frozen eligibility, up to three rounds for expanded S300.
 All dates stay inside the original event. Only real matches count for fitness/stats.
 """
 import math
@@ -10,7 +10,7 @@ from season import POINTS
 from career_helpers import dateadd, rng, seed_order, player
 
 RULES={'100':(40,8,32),'300':(28,4,16),'500':(28,4,16)}
-def rules(e):return (24,8,32) if e['level']=='100' and e.get('ruleset')!='bwf84' else RULES[e['level']]
+def rules(e):return (24,8,64) if e['level']=='300' and e.get('s300_expanded') else (24,8,32) if e['level']=='100' and e.get('ruleset')!='bwf84' else RULES[e['level']]
 def main_capacity(e):return 48 if e['level']=='100' and e.get('ruleset')=='bwf84' else 32
 _original_allocate=reg.allocate
 _original_draw=old.draw
@@ -22,8 +22,19 @@ def allocate(s,e,r,pool):
     d,k,q=rules(e);out=[]
     for pid in pool:
         if pid not in out and reg.available(s,e,player(s,pid),r):out.append(pid)
-        if len(out)>=d+q:break
-    return out
+    if e.get('s300_expanded') and e['level']=='300' and r['phase']=='open' and len(out)>d+q:
+        # Ranking remains the primary route. Up to four qualifying places go
+        # to recent S100 finalists otherwise below the ranking cutoff.
+        # Applies equally to NPCs and the managed player; no extra slots.
+        cutoff=dateadd(e['start'],-84)
+        def merit(pid):
+            rows=[x for x in player(s,pid).get('ranking_ledger',[]) if x.get('level')=='100' and not x.get('synthetic',False) and cutoff<=x['date']<e['start'] and x['points']>=4680]
+            return max((x['points'] for x in rows),default=0)
+        promoted=sorted((pid for pid in out[d+q:] if merit(pid)),key=lambda pid:(-merit(pid),r['rank_snapshot'][str(pid)]['rank'],pid))[:4]
+        if promoted:
+            out=out[:d+q-len(promoted)]+promoted
+            r['merit_qualifiers']=promoted
+    return out[:d+q]
 
 def split(e,entries):
     if e['level'] not in RULES or len(entries)<=main_capacity(e):return list(entries),[]
@@ -58,6 +69,14 @@ def draw(s,e):
     if size==64:v['days']['R64']=e['start']
     if v['days']['F']>e['end']:raise ValueError('qualification needs six event days')
     s['v42']['events'][eid]=v;e['entries']=v['entries'].copy();r['phase']='drawn';r['history'].append({'date':s['date'],'action':'draw','entries':v['entries'].copy()})
+    if e.get('s300_expanded') and len(qual)>32:
+        q=v['qualification'];q['rounds']=3;v['days']['Q3']=dateadd(e['start'],1)
+        # Eight seeded qualification channels, each an 8-slot knockout.
+        # Q1/Q2 day one, Q3/R32 day two: at most two real matches per day.
+        for g in groups:
+            slots=[g[i] if i<len(g) else None for i in seed_order(8)]
+            for a,b in zip(slots[::2],slots[1::2]):old.add(v,'Q1',a,b)
+        return v
     for g in groups:
         pairs=[]
         if len(g)==4:pairs=[(g[0],g[3]),(g[1],g[2])]
@@ -117,8 +136,22 @@ def main_draw(s,e,v):
     if len(slots)==64 and e.get('ruleset')=='bwf84':v['queue'][start:]=sorted(v['queue'][start:],key=lambda m:(m['date'],m['slot']))
 
 def next_round(s,e,v,st):
-    if st not in ('Q1','Q2'):return _original_next(s,e,v,st)
+    if st not in ('Q1','Q2','Q3'):return _original_next(s,e,v,st)
     q=v['qualification']
+    if q.get('rounds')==3:
+        results=[m for m in v['results'] if m['stage']==st]
+        for m in results:
+            for i in (m['a'],m['b']):
+                if i is not None and i!=m['winner']:
+                    q['eliminated'][str(i)]=st
+                    notify(s,e,i,'qualifying_eliminated','资格赛淘汰，未能晋级正赛。')
+        winners=[m['winner'] for m in results]
+        if st=='Q3':
+            q['winners']=[i for i in winners if i is not None];main_draw(s,e,v)
+        else:
+            nxt='Q2' if st=='Q1' else 'Q3'
+            for a,b in zip(winners[::2],winners[1::2]):old.add(v,nxt,a,b)
+        return
     for m in v['results']:
         if m['stage']!=st:continue
         for i in (m['a'],m['b']):
@@ -136,11 +169,11 @@ def settle(s,e,v):
     original=v['entries'];v['entries']=q['main_entries']
     try:_original_settle(s,e,v)
     finally:v['entries']=original
-    played={i for m in v['results'] if m['stage'] in ('Q1','Q2') and m.get('outcome') in ('played','retirement') for i in (m['a'],m['b'])}
+    played={i for m in v['results'] if m['stage'] in ('Q1','Q2','Q3') and m.get('outcome') in ('played','retirement') for i in (m['a'],m['b'])}
     for pid,st in q['eliminated'].items():
         i=int(pid)
         if i not in played:continue
-        p=player(s,i);pts=rank.points_for(e,7 if st=='Q1' and e['level']=='100' else 6) if e.get('ruleset')=='bwf84' else round(POINTS[e['level']][-1]*(.4 if st=='Q1' else .7))
+        p=player(s,i);pts=rank.points_for(e,7 if (st=='Q1' and e['level']=='100') or (q.get('rounds')==3 and st!='Q3') else 6) if e.get('ruleset')=='bwf84' else round(POINTS[e['level']][-1]*(.4 if st=='Q1' or (q.get('rounds')==3 and st=='Q2') else .7))
         p['ranking_ledger'].append(dict(event_id=e['id'],date=s['date'],level=e['level'],points=pts,synthetic=False,qualifying_round=st,race_season=rank.race_year(s,e)))
     rank.rankings(s)
 
@@ -150,8 +183,8 @@ def playable(s,eid,item):
 
 def recover_same_day(s,eid,item):
     # Two-hour modelled break between qualifying matches on the same date, no extra daily/form tick.
-    if item['stage'] not in ('Q2','R64','R32') or not playable(s,eid,item):return
-    v=s['v42']['events'][eid];previous={i for m in v['results'] if m['date']==s['date'] and m['stage'] in ('Q1','Q2','R64') and m.get('outcome') in ('played','retirement') for i in (m['a'],m['b'])}
+    if item['stage'] not in ('Q2','Q3','R64','R32') or not playable(s,eid,item):return
+    v=s['v42']['events'][eid];previous={i for m in v['results'] if m['date']==s['date'] and m['stage'] in ('Q1','Q2','Q3','R64') and m.get('outcome') in ('played','retirement') for i in (m['a'],m['b'])}
     for i in (item['a'],item['b']):
         if i not in previous:continue
         p=player(s,i);f=p['fitness'];a=p['attributes'];rec=max(.5,min(1.4,1+.014*(a['身体素质']-85)+.010*(a['体能耐力']-85)))

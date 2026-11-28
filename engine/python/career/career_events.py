@@ -159,7 +159,7 @@ def settle(s,e,v):
     if v['settled']:raise ValueError('duplicate settlement')
     if set(v['placements'])!=set(map(str,v['entries'])):raise ValueError('missing placements')
     # No ranking credits or prizes for an entrant who never played a real point.
-    played={i for m in s['matches'] if m['event_id']==e['id'] and m.get('log_available',True) and (not v.get('qualification') or m['stage'] not in ('Q1','Q2')) for i in (m['a'],m['b'])}
+    played={i for m in s['matches'] if m['event_id']==e['id'] and m.get('log_available',True) and (not v.get('qualification') or m['stage'] not in ('Q1','Q2','Q3')) for i in (m['a'],m['b'])}
     rank.award(s,e,v['placements'],played);v['prizes']={};lvl=e['level']
     for i,stage in v['placements'].items():
         p=player(s,int(i));gross=round(PRIZE[lvl]*[1,.5,.25,.125,.06,.03,.01,0][stage]) if p['id'] in played else 0;share=round(gross*.3) if p['id'] in s['club']['roster'] else 0

@@ -1,4 +1,4 @@
-"""V15.4 high-serve spatial-engine surrogate (simulation-calibrated, not real-match data).
+"""V15.5 handedness-calibrated high-serve spatial-engine surrogate (simulation-calibrated, not real-match data).
 No rank, CA, name or ownership enters the model. No trajectory is fabricated.
 """
 import math

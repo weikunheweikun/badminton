@@ -328,7 +328,7 @@ function steepServeDemand(kind,v){return kind==='long'?cl((Math.atan2(Math.max(0
 function makeBall(r,kind,from,h,target,p,f,quality,pressure,key,preview=false,receiving=false,errors=null,contact=null,trajectoryMode=null){
  const constraint=strokeConstraint(kind,from,target,contact),s=SHOTS[kind],spread=directionalSpread(p,kind,from,target,quality,strokeSpread(p,kind,f,quality,key,receiving)),{skill,stress}=spread,sigma=spread.sigma*(contact?.special?.spread??1)*constraint.spread,heightSigma=spread.heightSigma*(contact?.special?.spread??1)*Math.sqrt(constraint.spread);
  const timing=errors?.[0]??(preview?0:cl(norm(r),-3.5,3.5)),direction=errors?.[1]??(preview?0:cl(norm(r),-3.5,3.5)),vertical=errors?.[2]??(preview?0:cl(norm(r),-3.5,3.5));
- const sign=target.x>=from.x?1:-1,to=pt(target.x+sign*timing*sigma,target.y+direction*sigma*.85),d=dist(from,to),drag=FLIGHT_DRAG[kind],fast=['smash','half','kill','drive'].includes(kind),high=['clear','lift','long','punch'].includes(kind),feedback=rebound(p,kind,quality,contact);
+ const sign=target.x>=from.x?1:-1,to=pt(target.x+sign*timing*sigma,target.y+direction*sigma*.85*(errors?1:P.bodyFor(p).hand*sign)),d=dist(from,to),drag=FLIGHT_DRAG[kind],fast=['smash','half','kill','drive'].includes(kind),high=['clear','lift','long','punch'].includes(kind),feedback=rebound(p,kind,quality,contact);
  const launch={short:7,long:15,clear:57.8,punch:45,drop:22.2,smash:70,half:35,drive:35,net:6.2,kill:38,lift:18,block:12}[kind];
  let v0=launch*cl(1+(skill-85)*.006-(1-quality)*.15-f*.0016,.68,1.20)*feedback.factor*(contact?.special?.power??1)*constraint.power;
  if(kind==='smash'||kind==='half')v0*=cl(1+.006*(P.rawAttr(p,'杀球进攻')-85)+.0025*(P.rawAttr(p,'爆发力')-85),.78,1.24);
@@ -429,7 +429,7 @@ function predict(observe,t,kind,p,f,bias){
  const read=.55*ability(p,'判断与预判')+.25*ability(p,'专注度')+.20*ability(p,'战术意识');
  const uncertainty=cl((.24+(99-read)*.010+f*.004)*Math.exp(-2.9*t),.035,1.15),dx=q2.x-q1.x,dy=q2.y-q1.y,dz=q2.z-q1.z,ds=Math.hypot(dx,dy,dz),decay=ds>1e-8?P.AIR_LENGTH*(-Math.expm1(-ds/P.AIR_LENGTH))/ds:1;
  const vx=dx/Math.max(.001,dt)*decay,vy=dy/Math.max(.001,dt)*decay,vz=dz/Math.max(.001,dt)*decay-9.81*dt*.5;
- const b=P.airPredict(pt(q2.x,q2.y),q2.z,vx*(1+.07*bias[0]*uncertainty),vy*(1+.07*bias[0]*uncertainty)+bias[2]*uncertainty*.45,vz+bias[3]*uncertainty*.55,t);
+ const b=P.airPredict(pt(q2.x,q2.y),q2.z,vx*(1+.07*bias[0]*uncertainty),vy*(1+.07*bias[0]*uncertainty)+bias[2]*uncertainty*.45*P.bodyFor(p).hand,vz+bias[3]*uncertainty*.55,t);
  return {b,uncertainty};
 }
 function quickReaction(m,p,kind){return cl(m.react-((FAST.includes(kind)||kind==='punch')?cl(.027+(ability(p,'判断与预判')-85)*.0012,.012,.045):0)-.0011*(ability(p,'判断与预判')-a(p,'判断与预判')),.075,.46);}
@@ -726,7 +726,7 @@ function replyForecast(s,p,other,f,of,as,ownPos,ctx,quality,key,intelligence){
  // geometric mean of forecast contact points. Costs use the same approach clock.
  const m=mobility(p,f),v=ctx.ownVel||pt(0,0),delay=recoveryClock.delay;
  let recovery=base,minCost=Infinity;
- for(const dx of [-.40,0,.40])for(const dy of [-.42,0,.42]){
+ for(const dx of [-.40,0,.40])for(const dy of [-.42,0,.42].map(y=>y*P.bodyFor(p).hand)){
   const candidate=pt(cl(base.x+dx,as===0?.40:N+.60,as===0?N-.60:L-.40),cl(base.y+dy,-1.35,1.35));
   const nextState=dx||dy?pathState(P.recoveryPlan(ownPos,candidate,v,m,delay,as,recoveryClock.air),t):state;
   let cost=.13*dist(base,candidate)+.025*dist(ownPos,candidate);
@@ -744,9 +744,10 @@ const AIM_DOMAIN={clear:[5.45,6.65],punch:[5.05,6.65],drop:[.55,2.65],smash:[2.1
 function aimDomain(kind,spread){const range=AIM_DOMAIN[kind],deep=['clear','lift','punch'].includes(kind),m=(deep?1.35:1.70)*spread.sigma,hi=Math.min(range[1],6.7-m);return {lo:Math.min(hi,Math.max(range[0],m)),hi,edge:Math.max(.40,W-1.65*spread.sigma*.85)};}
 function aimPoints(kind,os,from,opos,vel,domain,phase=.5,phaseY=.5,count=7,receiver=null){
  const {lo,hi,edge}=domain,pts=[],sign=os===0?1:-1,od=depth(os,opos),oy=opos.y*sign,vy=vel.y*sign,vd=vel.x*(os===0?-1:1);
+ const hand=receiver?P.bodyFor(receiver).hand:1;
  const add=(d,y)=>{const a=local(os,cl(d,lo,hi),cl(y,-edge,edge));if(!pts.some(p=>dist(p,a)<.16))pts.push(a);};
- for(let i=0;i<count;i++)add(mix(lo,hi,(i+phase)/count),edge*(2*((phaseY+i*.61803398875)%1)-1));
- const pred=cl(oy+vy*.28,-edge,edge),dep=cl(od+vd*.28,lo,hi),gap=pred>=0?-1:1;
+ for(let i=0;i<count;i++)add(mix(lo,hi,(i+phase)/count),hand*edge*(2*((phaseY+i*.61803398875)%1)-1));
+ const pred=cl(oy+vy*.28,-edge,edge),dep=cl(od+vd*.28,lo,hi),gap=pred===0?-hand:pred>0?-1:1;
  if(receiver){const hand=P.bodyFor(receiver).hand;
   // Probe both racket-side lanes, rather than forcing a backhand target.
   if(HIGH.includes(kind)){add(hi,-hand*edge*.86);add(hi,hand*edge*.86);}
@@ -871,7 +872,7 @@ function choose(r,p,other,f,of,side,from,h,quality,opos,prev,server,score,key,ow
   if(plan.target==='body'&&ATTACK.includes(kind))u+=.17*(1-risk)*unit(1-Math.abs(target.y-opos.y)/1.6);
   if(plan.pace==='slow')u+=.12*(1-risk)*travel-.12*energy;if(plan.pace==='fast')u+=.12*(1-risk)*winner;
   // Only modest within-kind target variation. A large utility gap cannot be overturned by noise.
-  u+=.012*Math.sin(phase*6.283+d*2.31+y*3.71);
+  u+=.012*Math.sin(phase*6.283+d*2.31+y*P.bodyFor(other).hand*3.71);
   const finish=DOWN.includes(kind)?initiative.readiness*attackWindow*(winner+.45*advantage):0;
   const reset=['lift','clear','block'].includes(kind)?(1-initiative.readiness)*(1-risk)*forecast.returnChance*(1-forecast.replyAttack):0;
   u+=.28*(1-risk)*finish+.15*reset;
@@ -880,7 +881,7 @@ function choose(r,p,other,f,of,side,from,h,quality,opos,prev,server,score,key,ow
  const modes=kind==='lift'?(ctx.contact?.special?['defensive','normal']:quality<.44?['normal','defensive']:quality>.65&&h>.75?['attacking','normal','defensive']:['normal','defensive']):[null];
  for(const mode of modes)for(const target of seeds)evaluate(target,mode);
  if(best){const origin=best.target,dd=depth(os,origin),yy=origin.y*(os===0?1:-1),step=.24+.22*intelligence;
-  for(const [dx,dy] of [[step,0],[-step,0],[0,step],[0,-step]]){const target=local(os,cl(dd+dx,domain.lo,domain.hi),cl(yy+dy,-domain.edge,domain.edge));if(!pool.some(s=>dist(s.target,target)<.12))evaluate(target,best.trajectoryMode);}
+  for(const [dx,dy] of [[step,0],[-step,0],[0,step*P.bodyFor(other).hand],[0,-step*P.bodyFor(other).hand]]){const target=local(os,cl(dd+dx,domain.lo,domain.hi),cl(yy+dy,-domain.edge,domain.edge));if(!pool.some(s=>dist(s.target,target)<.12))evaluate(target,best.trajectoryMode);}
   const alts=pool.filter(s=>dist(s.target,best.target)>.65&&s.utility>=best.utility-.28).sort((a,b)=>b.utility-a.utility);best.alternate=alts[0];candidates.push(best);
  }}
  if(!candidates.length){ // Last-resort loft: maximize real net clearance rather than blindly lifting deep.

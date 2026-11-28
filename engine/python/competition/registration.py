@@ -140,6 +140,8 @@ def close(s,e):
         race_order=sorted(s['players'],key=lambda p:order_key(e,p,r['rank_snapshot']))
         if champion in pool and player(s,champion)['rank']<=20:
             pool.remove(champion);pool.insert(0,champion);r['champion_invitation']=champion
+    # Game-specific wider S300 pathway; only new entry closures adopt it.
+    if level=='300':e['s300_expanded']=True
     r['pool']=pool;r['entries']=allocate(s,e,r,pool);r['reserves']=[i for i in pool if i not in r['entries']];r['phase']='accepted';r['history'].append({'date':s['date'],'action':'close','entries':r['entries'].copy()});return r
 
 def review(s,e):

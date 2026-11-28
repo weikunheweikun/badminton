@@ -39,14 +39,14 @@ def sporting_status(v):
     statuses={}
     for m in v.get('results',[]):
         st=m['stage'];w=m.get('winner')
-        if st in ('Q1','Q2') or st.startswith('G'):continue
+        if st in ('Q1','Q2','Q3') or st.startswith('G'):continue
         for i in (m['a'],m['b']):
             if i is not None and i!=w:statuses[str(i)]={'stage':st,'state':'eliminated'}
         if w is not None:statuses[str(w)]={'stage':st,'state':'champion' if st=='F' else 'advanced'}
     for i,z in v.get('placements',{}).items():
         statuses[i]={'state':'placement','placement':z}
     for m in v.get('queue',[])[v.get('cursor',0):]:
-        if m['stage'] in ('Q1','Q2'):continue
+        if m['stage'] in ('Q1','Q2','Q3'):continue
         for i in (m['a'],m['b']):
             if i is not None and str(i) not in v.get('placements',{}) and statuses.get(str(i),{}).get('state')!='eliminated':statuses[str(i)]={'stage':m['stage'],'state':'pending'}
     # Group stage results are not knockout eliminations. A three-player group
@@ -76,7 +76,7 @@ def events_view(s):
         controlled=[i for i in s['club']['roster'] if reg.controlled(s,e,i)]
         direct,qualifiers=qual.split(e,r.get('entries',[])) if not v else (v.get('qualification',{}).get('direct',v.get('entries',[])),v.get('qualification',{}).get('entrants',[]))
         q=v.get('qualification',{})
-        rows.append(dict(**e,team_conflicts=blocked,conflicts={str(i):[o['name'] for o in s['calendar'] if o['id']!=eid and o['status']!='cancelled' and e['start']<=o['end'] and o['start']<=e['end'] and i in s['registrations'].get(o['id'],{}).get('entries',[]) and str(i) not in s['registrations'].get(o['id'],{}).get('withdrawn',{})] for i in s['club']['roster']},overlaps=[o['name'] for o in s['calendar'] if o['id']!=eid and e['start']<=o['end'] and o['start']<=e['end']],qualification=dict(direct=direct,entrants=qualifiers,winners=q.get('winners',[]),eliminated=q.get('eliminated',{}),finished=q.get('finished',False),main_entries=q.get('main_entries',[])),sporting_status=sporting_status(v),deadlines=d,phase=phase,intents=r.get('intents',{}),accepted=r.get('entries',[]),reserves=r.get('reserves',[]),withdrawn=r.get('withdrawn',{}),controlled=controlled,decisions=r.get('decisions',{}),played=v.get('cursor',0),total=len(v.get('queue',[])),champion=next((int(i) for i,z in v.get('placements',{}).items() if z==0),None)))
+        rows.append(dict(**e,team_conflicts=blocked,conflicts={str(i):[o['name'] for o in s['calendar'] if o['id']!=eid and o['status']!='cancelled' and e['start']<=o['end'] and o['start']<=e['end'] and i in s['registrations'].get(o['id'],{}).get('entries',[]) and str(i) not in s['registrations'].get(o['id'],{}).get('withdrawn',{})] for i in s['club']['roster']},overlaps=[o['name'] for o in s['calendar'] if o['id']!=eid and e['start']<=o['end'] and o['start']<=e['end']],qualification=dict(direct=direct,entrants=qualifiers,merit=r.get('merit_qualifiers',[]),rounds=q.get('rounds',2),winners=q.get('winners',[]),eliminated=q.get('eliminated',{}),finished=q.get('finished',False),main_entries=q.get('main_entries',[])),sporting_status=sporting_status(v),deadlines=d,phase=phase,intents=r.get('intents',{}),accepted=r.get('entries',[]),reserves=r.get('reserves',[]),withdrawn=r.get('withdrawn',{}),controlled=controlled,decisions=r.get('decisions',{}),played=v.get('cursor',0),total=len(v.get('queue',[])),champion=next((int(i) for i,z in v.get('placements',{}).items() if z==0),None)))
     return rows
 
 def prematch_history(s, a, b):
@@ -289,7 +289,13 @@ def handle(action,data):
         elif action=='withdraw':old.withdraw(S,data['event'],int(data['id']),data.get('reason','voluntary'));result={'withdrawn':True}
         elif action=='run':
             if not S['club']['roster']:raise ValueError('个人生涯已结束，请查看生涯历史')
-            result=m.run(S,data['target'],bool(data.get('auto',False)),fast_auto=bool(data.get('fast_auto',False)))
+            stop_event=data.get('stop_event')
+            if stop_event is not None:
+                v=S['v42']['events'].get(stop_event); e=next((e for e in S['calendar'] if e['id']==stop_event),None)
+                if not v or not e or S['career_player_id'] not in v.get('entries',[]):raise ValueError('只能模拟已入围的当前赛事')
+                # Registration decisions for other stations remain manual.
+                result=m.run(S,max(S['date'],e['end']),False,stop_event=stop_event)
+            else:result=m.run(S,data['target'],bool(data.get('auto',False)),fast_auto=bool(data.get('fast_auto',False)))
         elif action=='coach':
             pending=match_pending(S)
             if not pending or pending['event_id']!=data.get('event') or pending['serial']!=data.get('serial') or not pending['spatial']:raise ValueError('当前比赛不支持战术调整')
@@ -314,9 +320,9 @@ def handle(action,data):
             result=m.play(S,data['event'],data.get('until','point'),retire_id=data.get('retire_id'))
             compact_point=bool(data.get('compact') and was_active and data.get('until')=='point' and result.get('pause')=='in_match' and data.get('retire_id') is None)
         else:raise ValueError('未知操作')
-    S['rules']['engine']='V15.1 dual: engine balance and tactical intelligence'
+    S['rules']['engine']='V15.5 dual: handedness-aware spatial and calibrated fast simulation'
     S['rules']['registration']='station-day entry and draw; one overlapping event per managed team; existing frozen entries preserved'
-    S['ui_revision']='15.4'
+    S['ui_revision']='15.5'
     if compact_point:
         pending=match_pending(S);active=S['v42']['events'][data['event']]['active']
         # Only transmit the new display row; persist the active match independently of the world archive.

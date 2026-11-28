@@ -17,7 +17,7 @@ qual.install()
 
 
 def create(seed,year=2027,roster_input=None,selected=()):
-    s=old.create(seed,year,count=len(roster_input) if roster_input is not None else 100,roster_input=roster_input);s['version']=VERSION;s['rules']['management']=VERSION;s['rules']['qualification']='BWF S100 40+8 (64-slot draw), S300/S500 28+4; one registration; first event day Q1/Q2'
+    s=old.create(seed,year,count=len(roster_input) if roster_input is not None else 100,roster_input=roster_input);s['version']=VERSION;s['rules']['management']=VERSION;s['rules']['qualification']='S100 40+8 (64-slot draw), S300 game expansion 24+8 (up to 64 qualifiers), S500 28+4; one registration; Q1/Q2 day one, Q3 if needed day two'
     # This mode is sporting management, not a transfer economy. Free selections have no monetary terms.
     for p in s['players']:p['employer']=None;p['npc_contract']=None
     s['rules']['contracts']='free sporting roster selection on January 1 before entries; no transfers or salaries in this mode'
@@ -100,9 +100,14 @@ def tick(s):
         view=s.copy();cutoff=dateadd(day,-168);view['matches']=[m for m in s['matches'] if m['date']>=cutoff];view['v42']=s['v42']|{'injury_history':[x for x in s['v42']['injury_history'] if x['until']>=dateadd(day,-7)]};growth_week(view,day)
     rank.rankings(s);update_bests(s);refresh_interest(s)
 
-def run(s,target,auto=False,fast_auto=False):
+def run(s,target,auto=False,fast_auto=False,stop_event=None):
     D(target)
     if not s['date']<=target or D(target).year>2099:raise ValueError('invalid target (through 2099)')
+    def tournament_done():
+        return stop_event is not None and (s['v42']['events'].get(stop_event,{}).get('settled') or event(s,stop_event)['status'] in ('completed','cancelled'))
+    def tournament_result():
+        return {'finished':True,'pause':'tournament_complete','event':stop_event,'date':s['date']}
+    if tournament_done():return tournament_result()
     while True:
         if s['date'][:4] in s['v42']['year_closed']:
             if s['date']==target:return {'finished':True,'date':target}
@@ -123,7 +128,7 @@ def run(s,target,auto=False,fast_auto=False):
                 admitted=pid in r.get('entries',[]) and r['phase']!='cancelled'
                 q=s['v42']['events'].get(eid,{}).get('qualification',{})
                 in_qual=admitted and pid in q.get('entrants',[])
-                reason=('进入资格赛，晋级后自动进入正赛，无需再次报名' if in_qual else '赛事取消' if r['phase']=='cancelled' else '已进入正式签表' if admitted else '资格审核未通过（伤病、冲突或积分资格）' if not decision.get('eligible_at_close') else '候补未递补 / 名额限制')
+                reason=(('凭近12周S100决赛成绩优先入围资格赛；晋级后自动进入正赛，无需再次报名' if pid in r.get('merit_qualifiers',[]) else '进入资格赛，晋级后自动进入正赛，无需再次报名') if in_qual else '赛事取消' if r['phase']=='cancelled' else '已进入正式签表' if admitted else '资格审核未通过（伤病、冲突或积分资格）' if not decision.get('eligible_at_close') else '候补未递补 / 名额限制')
                 message={'id':eid+':'+str(pid),'event':eid,'event_name':e['name'],'date':s['date'],'player_id':pid,'admitted':admitted,'entry_status':'qualifying' if in_qual else 'direct' if admitted else 'rejected','reason':reason}
                 inbox=s.setdefault('registration_inbox',[])
                 if not any(x['id']==message['id'] for x in inbox):inbox.append(message)
@@ -132,10 +137,11 @@ def run(s,target,auto=False,fast_auto=False):
         for eid,v in sorted(s['v42']['events'].items()):
             while not v['settled'] and v['cursor']<len(v['queue']) and v['queue'][v['cursor']]['date']==s['date']:
                 item=v['queue'][v['cursor']]
-                if not auto and {item['a'],item['b']}&set(s['club']['roster']) and (v['active'] or qual.playable(s,eid,item)):return {'pause':'match','event':eid,'match':item,'date':s['date']}
-                play(s,eid,fast=auto and fast_auto)
+                if not auto and eid!=stop_event and {item['a'],item['b']}&set(s['club']['roster']) and (v['active'] or qual.playable(s,eid,item)):return {'pause':'match','event':eid,'match':item,'date':s['date']}
+                play(s,eid,fast=(auto and fast_auto) or eid==stop_event)
+                if tournament_done():return tournament_result()
         if s['date'].endswith('-12-31'):close(s)
-        if s['date']==target:return {'finished':True,'date':target}
+        if s['date']==target:return {'finished':True,'date':target} if stop_event is None else {'pause':'tournament_pending','event':stop_event,'date':s['date']}
         if s['date'][:4] in s['v42']['year_closed']:continue
         if D(s['date']).day==calendar.monthrange(D(s['date']).year,D(s['date']).month)[1]:settle_month(s,s['date'])
         s['date']=dateadd(s['date'],1);tick(s)
