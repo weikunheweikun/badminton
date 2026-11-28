@@ -1,0 +1,125 @@
+{
+  "version": "15.1",
+  "files": [
+    {
+      "path": "engine/attributes.py",
+      "url": "engine/python/core/attributes.py"
+    },
+    {
+      "path": "engine/business.py",
+      "url": "engine/python/management/business.py"
+    },
+    {
+      "path": "tournaments.json",
+      "url": "data/tournaments.json"
+    },
+    {
+      "path": "engine/calendar_rules.py",
+      "url": "engine/python/competition/calendar_rules.py"
+    },
+    {
+      "path": "engine/contracts.py",
+      "url": "engine/python/management/contracts.py"
+    },
+    {
+      "path": "engine/engine.py",
+      "url": "engine/python/core/engine.py"
+    },
+    {
+      "path": "engine/legacy_rally.py",
+      "url": "engine/python/match/legacy_rally.py"
+    },
+    {
+      "path": "engine/legacy_match.py",
+      "url": "engine/python/match/legacy_match.py"
+    },
+    {
+      "path": "engine/match_engine.py",
+      "url": "engine/python/match/match_engine.py"
+    },
+    {
+      "path": "engine/fitness.py",
+      "url": "engine/python/core/fitness.py"
+    },
+    {
+      "path": "engine/growth_tables.py",
+      "url": "engine/python/career/growth_tables.py"
+    },
+    {
+      "path": "engine/growth.py",
+      "url": "engine/python/career/growth.py"
+    },
+    {
+      "path": "engine/lifecycle.py",
+      "url": "engine/python/career/lifecycle.py"
+    },
+    {
+      "path": "engine/legacy_career.py",
+      "url": "engine/python/career/legacy_career.py"
+    },
+    {
+      "path": "engine/career_helpers.py",
+      "url": "engine/python/career/career_helpers.py"
+    },
+    {
+      "path": "engine/career_events.py",
+      "url": "engine/python/career/career_events.py"
+    },
+    {
+      "path": "engine/career.py",
+      "url": "engine/python/career/career.py"
+    },
+    {
+      "path": "engine/negotiate.py",
+      "url": "engine/python/management/negotiate.py"
+    },
+    {
+      "path": "engine/career_setup_base.py",
+      "url": "engine/python/career/career_setup_base.py"
+    },
+    {
+      "path": "engine/career_setup.py",
+      "url": "engine/python/career/career_setup.py"
+    },
+    {
+      "path": "engine/qualification.py",
+      "url": "engine/python/competition/qualification.py"
+    },
+    {
+      "path": "engine/ranking.py",
+      "url": "engine/python/competition/ranking.py"
+    },
+    {
+      "path": "engine/recruitment.py",
+      "url": "engine/python/management/recruitment.py"
+    },
+    {
+      "path": "engine/registration.py",
+      "url": "engine/python/competition/registration.py"
+    },
+    {
+      "path": "engine/season.py",
+      "url": "engine/python/competition/season.py"
+    },
+    {
+      "path": "web_adapter.py",
+      "url": "engine/python/web_adapter.py"
+    },
+    {
+      "path": "players.json",
+      "url": "data/players.json"
+    },
+    {
+      "path": "engine/draw.py",
+      "url": "engine/python/competition/draw.py"
+    },
+    {
+      "path": "engine/calibrated_fast.py",
+      "url": "engine/python/match/calibrated_fast.py"
+    },
+    {
+      "path": "engine/calibrated_data.py",
+      "url": "engine/python/match/calibrated_data.py"
+    }
+  ]
+}
